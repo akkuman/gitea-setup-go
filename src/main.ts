@@ -34,9 +34,16 @@ export async function run() {
 
       const checkLatest = core.getBooleanInput('check-latest');
 
+      const skipDownloadFromGithub = core.getBooleanInput('skip-download-from-github');
+      const officalDownloadMirror = core.getInput('offical-download-mirror');
+      const officalDownloadMetadata = core.getInput('offical-download-metadata');
+
       const installDir = await installer.getGo(
         versionSpec,
         checkLatest,
+        skipDownloadFromGithub,
+        officalDownloadMirror,
+        officalDownloadMetadata,
         auth,
         arch
       );

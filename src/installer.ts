@@ -41,6 +41,9 @@ export interface IGoVersionInfo {
 export async function getGo(
   versionSpec: string,
   checkLatest: boolean,
+  skipDownloadFromGithub: boolean,
+  officalDownloadMirror: string,
+  officalDownloadMetadata: string,
   auth: string | undefined,
   arch: Architecture = os.arch() as Architecture
 ) {
@@ -104,35 +107,37 @@ export async function getGo(
   //
   // Try download from internal distribution (popular versions only)
   //
-  try {
-    info = await getInfoFromManifest(versionSpec, true, auth, arch, manifest);
-    if (info) {
-      downloadPath = await installGoVersion(info, auth, arch);
-    } else {
-      core.info(
-        'Not found in manifest.  Falling back to download directly from Go'
-      );
+  if (!skipDownloadFromGithub) {
+    try {
+      info = await getInfoFromManifest(versionSpec, true, auth, arch, manifest);
+      if (info) {
+        downloadPath = await installGoVersion(info, auth, arch);
+      } else {
+        core.info(
+          'Not found in manifest.  Falling back to download directly from Go'
+        );
+      }
+    } catch (err) {
+      if (
+        err instanceof tc.HTTPError &&
+        (err.httpStatusCode === 403 || err.httpStatusCode === 429)
+      ) {
+        core.info(
+          `Received HTTP status code ${err.httpStatusCode}.  This usually indicates the rate limit has been exceeded`
+        );
+      } else {
+        core.info((err as Error).message);
+      }
+      core.debug((err as Error).stack ?? '');
+      core.info('Falling back to download directly from Go');
     }
-  } catch (err) {
-    if (
-      err instanceof tc.HTTPError &&
-      (err.httpStatusCode === 403 || err.httpStatusCode === 429)
-    ) {
-      core.info(
-        `Received HTTP status code ${err.httpStatusCode}.  This usually indicates the rate limit has been exceeded`
-      );
-    } else {
-      core.info((err as Error).message);
-    }
-    core.debug((err as Error).stack ?? '');
-    core.info('Falling back to download directly from Go');
   }
 
   //
   // Download from storage.googleapis.com
   //
   if (!downloadPath) {
-    info = await getInfoFromDist(versionSpec, arch);
+    info = await getInfoFromDist(versionSpec, arch, officalDownloadMirror, officalDownloadMetadata);
     if (!info) {
       throw new Error(
         `Unable to find Go version '${versionSpec}' for platform ${osPlat} and architecture ${arch}.`
@@ -382,14 +387,16 @@ export async function getInfoFromManifest(
 
 async function getInfoFromDist(
   versionSpec: string,
-  arch: Architecture
+  arch: Architecture,
+  officalDownloadMirror: string,
+  officalDownloadMetadata: string
 ): Promise<IGoVersionInfo | null> {
-  const version: IGoVersion | undefined = await findMatch(versionSpec, arch);
+  const version: IGoVersion | undefined = await findMatch(officalDownloadMetadata, versionSpec, arch);
   if (!version) {
     return null;
   }
 
-  const downloadUrl = `https://go.dev/dl/${version.files[0].filename}`;
+  const downloadUrl = `${officalDownloadMirror}/${version.files[0].filename}`;
 
   return <IGoVersionInfo>{
     type: 'dist',
@@ -400,6 +407,7 @@ async function getInfoFromDist(
 }
 
 export async function findMatch(
+  officalDownloadMetadata: string,
   versionSpec: string,
   arch: Architecture = os.arch() as Architecture
 ): Promise<IGoVersion | undefined> {
@@ -409,7 +417,7 @@ export async function findMatch(
   let result: IGoVersion | undefined;
   let match: IGoVersion | undefined;
 
-  const dlUrl = 'https://golang.org/dl/?mode=json&include=all';
+  const dlUrl = officalDownloadMetadata || 'https://go.dev/dl/?mode=json&include=all';
   const candidates: IGoVersion[] | null = await module.exports.getVersionsDist(
     dlUrl
   );
