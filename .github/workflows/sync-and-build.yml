@@ -1,0 +1,55 @@
+name: Sync upstream and build
+
+on:
+  workflow_dispatch: # Allow manual trigger
+  schedule:
+    - cron: '0 0 * * 1' # Run weekly on Monday at midnight (UTC)
+
+jobs:
+  sync-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch full history
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm i -g @vercel/ncc
+          npm i -g typescript
+
+      - name: Merge upstream changes and rebuild
+        run: |
+          # Configure Git user
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # Add upstream repository and fetch updates
+          git remote add upstream https://github.com/actions/setup-go.git || echo "Upstream remote already exists"
+          git fetch upstream
+          
+          # Merge upstream changes, ignoring the dist folder
+          git merge --no-commit --no-ff upstream/main
+          # Reset any changes to the dist folder
+          git reset -- dist/ || true
+          git checkout -- dist/ || true
+
+          # Build the project
+          npm run build
+
+          # Commit the build output
+          git add .
+          if git diff-index --quiet HEAD --; then
+            echo "No build changes to commit"
+          else
+            git commit -m "auto: merge upstream changes and build"
+            git push
+            echo "Build changes committed and pushed"
+          fi
