@@ -94492,8 +94492,8 @@ const MANIFEST_REPO_OWNER = 'actions';
 const MANIFEST_REPO_NAME = 'go-versions';
 const MANIFEST_REPO_BRANCH = 'main';
 const MANIFEST_URL = `https://raw.githubusercontent.com/${MANIFEST_REPO_OWNER}/${MANIFEST_REPO_NAME}/${MANIFEST_REPO_BRANCH}/versions-manifest.json`;
-function getGo(versionSpec_1, checkLatest_1, auth_1) {
-    return __awaiter(this, arguments, void 0, function* (versionSpec, checkLatest, auth, arch = os_1.default.arch()) {
+function getGo(versionSpec_1, checkLatest_1, skipDownloadFromGithub_1, officalDownloadMirror_1, officalDownloadMetadata_1, auth_1) {
+    return __awaiter(this, arguments, void 0, function* (versionSpec, checkLatest, skipDownloadFromGithub, officalDownloadMirror, officalDownloadMetadata, auth, arch = os_1.default.arch()) {
         var _a;
         let manifest;
         const osPlat = os_1.default.platform();
@@ -94534,31 +94534,33 @@ function getGo(versionSpec_1, checkLatest_1, auth_1) {
         //
         // Try download from internal distribution (popular versions only)
         //
-        try {
-            info = yield getInfoFromManifest(versionSpec, true, auth, arch, manifest);
-            if (info) {
-                downloadPath = yield installGoVersion(info, auth, arch);
+        if (!skipDownloadFromGithub) {
+            try {
+                info = yield getInfoFromManifest(versionSpec, true, auth, arch, manifest);
+                if (info) {
+                    downloadPath = yield installGoVersion(info, auth, arch);
+                }
+                else {
+                    core.info('Not found in manifest.  Falling back to download directly from Go');
+                }
             }
-            else {
-                core.info('Not found in manifest.  Falling back to download directly from Go');
+            catch (err) {
+                if (err instanceof tc.HTTPError &&
+                    (err.httpStatusCode === 403 || err.httpStatusCode === 429)) {
+                    core.info(`Received HTTP status code ${err.httpStatusCode}.  This usually indicates the rate limit has been exceeded`);
+                }
+                else {
+                    core.info(err.message);
+                }
+                core.debug((_a = err.stack) !== null && _a !== void 0 ? _a : '');
+                core.info('Falling back to download directly from Go');
             }
-        }
-        catch (err) {
-            if (err instanceof tc.HTTPError &&
-                (err.httpStatusCode === 403 || err.httpStatusCode === 429)) {
-                core.info(`Received HTTP status code ${err.httpStatusCode}.  This usually indicates the rate limit has been exceeded`);
-            }
-            else {
-                core.info(err.message);
-            }
-            core.debug((_a = err.stack) !== null && _a !== void 0 ? _a : '');
-            core.info('Falling back to download directly from Go');
         }
         //
         // Download from storage.googleapis.com
         //
         if (!downloadPath) {
-            info = yield getInfoFromDist(versionSpec, arch);
+            info = yield getInfoFromDist(versionSpec, arch, officalDownloadMirror, officalDownloadMetadata);
             if (!info) {
                 throw new Error(`Unable to find Go version '${versionSpec}' for platform ${osPlat} and architecture ${arch}.`);
             }
@@ -94732,13 +94734,13 @@ function getInfoFromManifest(versionSpec_1, stable_1, auth_1) {
         return info;
     });
 }
-function getInfoFromDist(versionSpec, arch) {
+function getInfoFromDist(versionSpec, arch, officalDownloadMirror, officalDownloadMetadata) {
     return __awaiter(this, void 0, void 0, function* () {
-        const version = yield findMatch(versionSpec, arch);
+        const version = yield findMatch(officalDownloadMetadata, versionSpec, arch);
         if (!version) {
             return null;
         }
-        const downloadUrl = `https://go.dev/dl/${version.files[0].filename}`;
+        const downloadUrl = `${officalDownloadMirror}/${version.files[0].filename}`;
         return {
             type: 'dist',
             downloadUrl: downloadUrl,
@@ -94747,13 +94749,13 @@ function getInfoFromDist(versionSpec, arch) {
         };
     });
 }
-function findMatch(versionSpec_1) {
-    return __awaiter(this, arguments, void 0, function* (versionSpec, arch = os_1.default.arch()) {
+function findMatch(officalDownloadMetadata_1, versionSpec_1) {
+    return __awaiter(this, arguments, void 0, function* (officalDownloadMetadata, versionSpec, arch = os_1.default.arch()) {
         const archFilter = sys.getArch(arch);
         const platFilter = sys.getPlatform();
         let result;
         let match;
-        const dlUrl = 'https://golang.org/dl/?mode=json&include=all';
+        const dlUrl = officalDownloadMetadata || 'https://go.dev/dl/?mode=json&include=all';
         const candidates = yield module.exports.getVersionsDist(dlUrl);
         if (!candidates) {
             throw new Error(`golang download url did not return results`);
@@ -94965,7 +94967,10 @@ function run() {
                 const token = core.getInput('token');
                 const auth = !token ? undefined : `token ${token}`;
                 const checkLatest = core.getBooleanInput('check-latest');
-                const installDir = yield installer.getGo(versionSpec, checkLatest, auth, arch);
+                const skipDownloadFromGithub = core.getBooleanInput('skip-download-from-github');
+                const officalDownloadMirror = core.getInput('offical-download-mirror');
+                const officalDownloadMetadata = core.getInput('offical-download-metadata');
+                const installDir = yield installer.getGo(versionSpec, checkLatest, skipDownloadFromGithub, officalDownloadMirror, officalDownloadMetadata, auth, arch);
                 const installDirVersion = path_1.default.basename(path_1.default.dirname(installDir));
                 core.addPath(path_1.default.join(installDir, 'bin'));
                 core.info('Added go to the path');
