@@ -1,29 +1,42 @@
-name: Sync upstream and build
+name: sync upstream and build
 
 on:
   workflow_dispatch: # Allow manual trigger
   schedule:
     - cron: '0 0 * * 1' # Run weekly on Monday at midnight (UTC)
 
+env:
+  UPSTREAM_REPO: "https://github.com/actions/setup-go.git"
+  MAIN_BRANCH: "main"
+
 jobs:
   sync-and-build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout current repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0 # Fetch full history
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24.x'
 
       - name: Install dependencies
         run: |
-          npm ci
-          npm i -g @vercel/ncc
-          npm i -g typescript
+          corepack enable
+          if [ -f "yarn.lock" ]; then
+            echo "Using yarn as package manager"
+            yarn install --immutable
+          elif [ -f "pnpm-lock.yaml" ]; then
+            echo "Using pnpm as package manager"
+            pnpm install --frozen-lockfile
+          else
+            echo "Using npm as package manager"
+            npm ci
+          fi
+          npm i -g @vercel/ncc typescript
 
       - name: Merge upstream changes and rebuild
         run: |
@@ -32,11 +45,14 @@ jobs:
           git config --global user.email "actions@github.com"
           
           # Add upstream repository and fetch updates
-          git remote add upstream https://github.com/actions/setup-go.git || echo "Upstream remote already exists"
-          git fetch upstream
+          git checkout $MAIN_BRANCH
+          git remote add upstream $UPSTREAM_REPO || echo "Upstream remote already exists"
+          git pull upstream $MAIN_BRANCH
+          git push origin $MAIN_BRANCH
           
           # Merge upstream changes, ignoring the dist folder
-          git merge --no-commit --no-ff upstream/main
+          git checkout gitea
+          git merge --no-commit --no-ff $MAIN_BRANCH
           # Reset any changes to the dist folder
           git reset -- dist/ || true
           git checkout -- dist/ || true
